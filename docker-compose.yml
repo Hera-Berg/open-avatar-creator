@@ -1,0 +1,7 @@
+services:
+  creator:
+    build: .
+    container_name: open-avatar-creator
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3001}:80"
