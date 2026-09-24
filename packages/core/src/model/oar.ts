@@ -39,6 +39,10 @@ export function validateManifest(raw: unknown): OarManifest {
   for (const key of ["name", "canvas", "layers", "bones", "meshes", "correctives", "params"]) {
     if (!(key in m)) throw new OarError(`manifest missing "${key}"`);
   }
+  // Keyforms arrived after version 1 shipped; they are purely additive, so
+  // older files are upgraded in place rather than bumping the version.
+  if (!("keyforms" in m)) m.keyforms = [];
+  if (!Array.isArray(m.keyforms)) throw new OarError('manifest "keyforms" must be an array');
   const manifest = m as unknown as OarManifest;
   const ids = new Set<string>();
   for (const layer of manifest.layers) {
@@ -116,6 +120,13 @@ export function stripForStudio(manifest: OarManifest): {
   }
   for (const corr of out.correctives) {
     if (!meshById.has(corr.meshId)) problems.push(`corrective ${corr.name} references missing mesh`);
+  }
+  for (const kf of out.keyforms) {
+    const layer = layerById.get(kf.layerId);
+    if (!layer) problems.push(`keyform ${kf.name} references missing layer`);
+    else if (layer.mesh !== kf.meshId) {
+      problems.push(`keyform ${kf.name} was made for a mesh ${layer.name} no longer uses (ignored)`);
+    }
   }
   if (out.rig) {
     const eyes: [string, typeof out.rig.eyes.left][] = [

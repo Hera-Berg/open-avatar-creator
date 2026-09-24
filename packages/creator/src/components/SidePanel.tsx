@@ -24,6 +24,8 @@ import {
 } from "../state/ops";
 import { engineHolder } from "../playback/engine";
 import { useState } from "react";
+import { KeyformPanel } from "./KeyformPanel";
+import { eyeGridMesh } from "../rig/blink";
 
 const PHYSICS_DEFAULT: OarPhysics = {
   enabled: true,
@@ -81,7 +83,7 @@ function LayerSection() {
   const selection = useStore((s) => s.selection);
   const model = useStore((s) => s.model);
   const layer = model.layers.find((l) => l.id === selection.layers[0]);
-  const [density, setDensity] = useState<"coarse" | "medium" | "fine">("coarse");
+  const [density, setDensity] = useState<"coarse" | "medium" | "fine" | "grid">("coarse");
   if (!layer) return null;
   const mesh = layer.mesh ? model.meshes.find((m) => m.id === layer.mesh) : null;
   return (
@@ -121,6 +123,7 @@ function LayerSection() {
               <option value="coarse">coarse (~40 verts)</option>
               <option value="medium">medium (~120)</option>
               <option value="fine">fine (~400)</option>
+              <option value="grid">even grid (eyes, keyform parts)</option>
             </select>
             <button
               onClick={() => {
@@ -130,8 +133,12 @@ function LayerSection() {
                   return;
                 }
                 // Coarse is the right default: more vertices is more to
-                // hand-edit, not better.
-                const mesh = generateMesh(newId("m"), img, layer.x, layer.y, density);
+                // hand-edit, not better. The even grid suits parts that fold
+                // (eye whites, lids): rows stay parallel as they compress.
+                const mesh =
+                  density === "grid"
+                    ? eyeGridMesh(layer, layer.boneId)
+                    : generateMesh(newId("m"), img, layer.x, layer.y, density);
                 useStore.getState().execute(addMesh(mesh, layer.id));
               }}
             >
@@ -282,7 +289,9 @@ function ParamsSection() {
               ["mouthWidthScale", "Mouth width confinement", 1, 3],
               ["mouthCorner", "Mouth corner length", 0.4, 1.2],
               ["hairWarpFollow", "Hair warp follow", 0, 1],
-              ["headPitchDeg", "Head pitch warp (deg)", 0, 20],
+              ["headTurnDeg", "Head turn angle (deg)", 0, 45],
+              ["headPitchDeg", "Head pitch angle (deg)", 0, 30],
+              ["headTurnDepth", "Head turn depth", 0, 1.5],
               ["headParallaxPx", "Hair parallax (px/step)", 0, 10],
             ] as const
           ).map(([key, label, min, max]) => (
@@ -427,6 +436,7 @@ export function SidePanel() {
       <BoneSection />
       <LayerSection />
       <PhysicsSection />
+      <KeyformPanel />
       <ParamsSection />
       <CorrectiveList />
     </div>

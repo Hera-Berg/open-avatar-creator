@@ -11,6 +11,8 @@ export * from "./geometry/contour";
 export * from "./geometry/triangulate";
 export * from "./skeleton/solve";
 export * from "./correctives/index";
+export * from "./keyforms/index";
+export * from "./keyforms/blink";
 export * from "./physics/spring";
 export * from "./face/eyes";
 export * from "./face/mouth";

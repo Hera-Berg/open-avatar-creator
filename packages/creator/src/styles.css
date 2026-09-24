@@ -338,3 +338,41 @@ input[type="range"] {
   border-radius: 6px;
   z-index: 60;
 }
+
+/* Keyforms */
+.row {
+  flex-wrap: wrap;
+}
+.corr-row {
+  align-items: center;
+  gap: 6px;
+}
+.corr-row.active {
+  background: #2a3a52;
+  border-radius: 4px;
+}
+.corr-row > span:first-child {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.key-chips {
+  display: flex;
+  gap: 3px;
+}
+.key-chips .chip {
+  border: none;
+  cursor: pointer;
+}
+.key-chips .chip:hover {
+  background: #45608a;
+}
+.keyform-active {
+  background: #1f2d40;
+  border: 1px solid #3a5578;
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin: 6px 0;
+}

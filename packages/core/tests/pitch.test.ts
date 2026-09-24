@@ -1,3 +1,4 @@
+import { RIG_PARAM_DEFAULTS } from "../src/model/params";
 import { describe, it, expect } from "vitest";
 import { solveModel, createSolveContext } from "../src/solve";
 import { emptyRig, type OarManifest, type Vec2 } from "../src/model/types";
@@ -31,9 +32,9 @@ function build(): { model: OarManifest; headBoneId: string } {
 
 /** The separable cylinder warps: yaw moves x, pitch moves y. */
 const warpX = (x: number, yawAngle: number) =>
-  headTurnX(clamp((x - 450) / 150, -3, 3), yawAngle, 450, 150, 1);
+  headTurnX(clamp((x - 450) / 150, -3, 3), yawAngle, 450, 150, RIG_PARAM_DEFAULTS.headTurnDepth);
 const warpY = (y: number, pitchAngle: number) =>
-  headTurnX(clamp((y - 300) / 200, -3, 3), pitchAngle, 300, 200, 1);
+  headTurnX(clamp((y - 300) / 200, -3, 3), pitchAngle, 300, 200, RIG_PARAM_DEFAULTS.headTurnDepth);
 
 /** Exact expected mapping for a head-bound layer at any yaw/pitch/roll pose:
  *  pre·post cancel across the two stages, so final = post(warpX, warpY).
@@ -73,19 +74,24 @@ describe("head pitch (vertical cylinder warp)", () => {
     }
   });
 
-  it("pitch=+1: features slide down, head foreshortens, bangs do not overtake the eyes", () => {
+  it("pitch=+1: features slide down, head keeps its size, bangs do not overtake the eyes", () => {
     const { model, headBoneId } = build();
     const ctx = createSolveContext();
     const solved = solveModel(model, { head_pitch: 1 }, ctx);
     const a = degToRad(PITCH_DEG);
     expectExact(model, solved, ctx, ["l_head", "l_eye", "l_hair"], headMatAt(model, headBoneId, 0), 0, a);
 
-    // Foreshortening: head outline gets shorter.
+    // No squash: the outline keeps its height (a Live2D nod slides the
+    // features; shrinking the whole face is what made pitch look wrong).
     const head = solved.layers.find((l) => l.id === "l_head")!;
     const headMesh = ctx.meshCache.get("l_head")!;
     const restH = Math.max(...headMesh.vertices.map((v) => v[1])) - Math.min(...headMesh.vertices.map((v) => v[1]));
     const solvedH = Math.max(...head.positions.map((p) => p[1])) - Math.min(...head.positions.map((p) => p[1]));
-    expect(solvedH).toBeLessThan(restH);
+    expect(solvedH).toBeCloseTo(restH, 1);
+    // ...while the features really did slide down.
+    const eye = solved.layers.find((l) => l.id === "l_eye")!;
+    const eyeRestTop = Math.min(...ctx.meshCache.get("l_eye")!.vertices.map((v) => v[1]));
+    expect(Math.min(...eye.positions.map((p) => p[1]))).toBeGreaterThan(eyeRestTop + 5);
 
     // Anti-swallow: a bang tip at the brow line (v≈0) and an eye just below
     // it must travel together — the differential is what covers the eyes.

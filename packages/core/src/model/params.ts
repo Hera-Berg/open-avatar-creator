@@ -60,6 +60,7 @@ export const RIG_PARAM_DEFAULTS = {
   blinkFloor: 0.32, // MediaPipe bottoms out ~0.1-0.2 on a full blink
   mouthGain: 1.6, // normal speech only drives jawOpen to 0.2-0.4
   headTurnDeg: 30, // cylinder warp range at head_yaw = ±1
+  headTurnDepth: 0.8, // face-turn warp strength: how far features slide toward the turn (capped so it never folds)
   headPitchDeg: 10, // vertical cylinder warp at head_pitch = ±1 — far tighter than yaw; the face topology breaks past ~20°
   headParallaxPx: 3, // hair depth parallax per order step (clamped ±4)
   hairWarpFollow: 1, // how much hair follows the cylinder warp (1 = attached like the eyes)
@@ -72,7 +73,7 @@ export const RIG_PARAM_DEFAULTS = {
   mouthWidthScale: 1.3, // >1 confines the opening to the middle of the lips
   mouthCorner: 0.75, // corner step-down end point (u) — opening is fully closed by here
   browRangePx: 24, // px brow travel at brow = ±1
-  lashInvert: 0, // closed-lash band inversion (0 = covers the eye, 1 = flips below)
+  lashInvert: 1, // closed-lash band: 1 = flipped below the lid line, lashes hanging down (drawn closed eyes); 0 = band above it
   // Physics globals
   bounce: 1, // master amplitude
   softness: 1, // master settle time

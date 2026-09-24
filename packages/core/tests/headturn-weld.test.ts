@@ -1,3 +1,4 @@
+import { RIG_PARAM_DEFAULTS } from "../src/model/params";
 import { describe, it, expect } from "vitest";
 import { solveModel, createSolveContext } from "../src/solve";
 import { headTurnX } from "../src/headturn/warp";
@@ -41,7 +42,7 @@ describe("head-turn welding", () => {
     // The weld: head layer and feature layers must satisfy the SAME
     // position-only warp map. yaw = 1 × 30° = 0.5236 rad.
     const angle = (30 * Math.PI) / 180;
-    const expected = (rx: number) => headTurnX((rx - 450) / 150, angle, 450, 150, 1);
+    const expected = (rx: number) => headTurnX((rx - 450) / 150, angle, 450, 150, RIG_PARAM_DEFAULTS.headTurnDepth);
     const checkLayer = (
       mesh: { vertices: [number, number][] },
       solvedLayer: { positions: [number, number][] },
@@ -66,7 +67,7 @@ describe("head-turn welding", () => {
     const parallax = Math.min(4, 12 - 5) * Math.sin(angle) * 3;
     bangsMesh.vertices.forEach(([rx], i) => {
       const u = Math.max(-3, Math.min(3, (rx - 450) / 150));
-      const expected = headTurnX(u, angle, 450, 150, 1) + parallax;
+      const expected = headTurnX(u, angle, 450, 150, RIG_PARAM_DEFAULTS.headTurnDepth) + parallax;
       expect(bangs.positions[i]![0]).toBeCloseTo(expected, 1);
     });
     // And it is not zero — parallax still exists for depth.

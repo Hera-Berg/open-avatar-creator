@@ -1,3 +1,4 @@
+import { RIG_PARAM_DEFAULTS } from "../src/model/params";
 import { describe, it, expect } from "vitest";
 import { solveModel, createSolveContext } from "../src/solve";
 import { emptyRig, type OarManifest } from "../src/model/types";
@@ -51,7 +52,7 @@ describe("yaw + roll composition", () => {
     // bone transform), so: solved = boneTransform(warp_x(rest), rest.y).
     const expected = (p: [number, number]): [number, number] => {
       const u = Math.max(-3, Math.min(3, (p[0] - 450) / 150));
-      const wx = headTurnX(u, yawAngle, 450, 150, 1);
+      const wx = headTurnX(u, yawAngle, 450, 150, RIG_PARAM_DEFAULTS.headTurnDepth);
       return matApply(postRot, wx, p[1]);
     };
     const checkExact = (
@@ -117,7 +118,7 @@ describe("yaw + roll composition", () => {
       const headWorld = world.get(headBone.id)!;
       const expected = (rx: number, ry: number): [number, number] => {
         const u = Math.max(-3, Math.min(3, (rx - 450) / 150));
-        const wx = headTurnX(u, yawAngle, 450, 150, 1);
+        const wx = headTurnX(u, yawAngle, 450, 150, RIG_PARAM_DEFAULTS.headTurnDepth);
         return matApply(headWorld.mat, wx, ry);
       };
       for (const layerId of ["l_head", "l_eye", "l_lip"]) {

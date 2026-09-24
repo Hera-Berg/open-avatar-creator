@@ -183,16 +183,75 @@ describe("blink (lid-contour morph)", () => {
     expect(checked).toBeGreaterThan(4);
   });
 
-  it("the interior fades as the lid descends and is gone by open=0.25", () => {
-    const mid = makeEye();
-    solveEye(mid.rigEye, mid.runtime, mid.working, 0.6, 0, 0);
-    expect(mid.working.get("l_white")!.alpha).toBeCloseTo(0.67, 1);
-    expect(mid.working.get("l_iris")!.alpha).toBeCloseTo(0.67, 1);
+  it("mid-blink the interior stays opaque — the lid covers it, no fade", () => {
+    const { working, rigEye, runtime } = makeEye();
+    solveEye(rigEye, runtime, working, 0.5, 0, 0);
+    expect(working.get("l_white")!.alpha).toBe(1);
+    expect(working.get("l_iris")!.alpha).toBe(1);
+  });
 
+  it("mid-blink the eye does not shrink: the white's top rides the lid, its bottom stays", () => {
+    const { working, rigEye, runtime, lidContour, lashLower } = makeEye();
+    solveEye(rigEye, runtime, working, 0.5, 0, 0);
+    const white = working.get("l_white")!;
+    let pushed = 0;
+    for (let i = 0; i < white.restVerts.length; i++) {
+      const [rx, ry] = white.restVerts[i]!;
+      const lid = sampleContour(lashLower, rx)! + (sampleContour(lidContour, rx)! - sampleContour(lashLower, rx)!) * 0.5;
+      const y = white.positions[i]![1];
+      if (ry < lid) {
+        expect(y).toBeCloseTo(lid, 6); // covered part sits on the lid line
+        pushed++;
+      } else {
+        expect(y).toBe(ry); // below the lid: untouched
+      }
+      expect(white.positions[i]![0]).toBe(rx);
+    }
+    expect(pushed).toBeGreaterThan(0);
+  });
+
+  it("the iris keeps its size through the blink (clipped by the white, not squashed)", () => {
+    const { working, rigEye, runtime } = makeEye();
+    working.get("l_iris")!.layer.clipTo = "l_white";
+    solveEye(rigEye, runtime, working, 0.3, 0, 0);
+    const iris = working.get("l_iris")!;
+    for (let i = 0; i < iris.restVerts.length; i++) {
+      expect(iris.positions[i]![1]).toBe(iris.restVerts[i]![1]);
+    }
+  });
+
+  it("an unclipped iris is covered directly so it never shows above the lid", () => {
+    const { working, rigEye, runtime, lidContour, lashLower } = makeEye();
+    solveEye(rigEye, runtime, working, 0.5, 0, 0);
+    const iris = working.get("l_iris")!;
+    for (let i = 0; i < iris.restVerts.length; i++) {
+      const rx = iris.restVerts[i]![0];
+      const lid = (sampleContour(lashLower, rx)! + sampleContour(lidContour, rx)!) / 2;
+      expect(iris.positions[i]![1]).toBeGreaterThanOrEqual(lid - 1e-6);
+    }
+  });
+
+  it("the interior only fades over the last sliver of the close", () => {
     const low = makeEye();
-    solveEye(low.rigEye, low.runtime, low.working, 0.25, 0, 0);
-    expect(low.working.get("l_white")!.alpha).toBe(0);
-    expect(low.working.get("l_iris")!.alpha).toBe(0);
+    solveEye(low.rigEye, low.runtime, low.working, 0.075, 0, 0);
+    expect(low.working.get("l_white")!.alpha).toBeCloseTo(0.5, 5);
+    expect(low.working.get("l_iris")!.alpha).toBeCloseTo(0.5, 5);
+  });
+
+  it("covers in the head's frame: a rotated white stays below the rotated lid", () => {
+    const { working, rigEye, runtime, lidContour, lashLower } = makeEye();
+    const post = rotationAbout([120, 110], (30 * Math.PI) / 180);
+    const pre = invert(post);
+    const white = working.get("l_white")!;
+    white.positions = white.restVerts.map((v) => matApply(post, v[0]!, v[1]!));
+    solveEye(rigEye, runtime, working, 0.5, 0, 0, { frame: { pre, post } });
+    for (let i = 0; i < white.restVerts.length; i++) {
+      const [rx, ry] = white.restVerts[i]!;
+      const lid = (sampleContour(lashLower, rx)! + sampleContour(lidContour, rx)!) / 2;
+      const [ex, ey] = matApply(post, rx, Math.max(ry, lid));
+      expect(white.positions[i]![0]).toBeCloseTo(ex, 6);
+      expect(white.positions[i]![1]).toBeCloseTo(ey, 6);
+    }
   });
 
   it("a one-column spike in the white's edge is smoothed out of the lid contour", () => {

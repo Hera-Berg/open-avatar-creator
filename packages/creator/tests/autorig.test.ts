@@ -153,10 +153,37 @@ describe("auto-rig end to end", () => {
     // Unrecognised layers do not move.
     const mystery = model.layers.find((l) => l.name === "mystery")!;
     expect(mystery.boneId).toBeNull();
+    // The blink is editable keyforms: every eye layer has a head-weighted
+    // mesh, and lash + white carry eye_*_open keys at 0 and 1.
+    for (const l of model.layers.filter((x) => ["eye_white", "iris", "eyelash_top"].includes(x.slot ?? ""))) {
+      const mesh = model.meshes.find((m) => m.id === l.mesh);
+      expect(mesh, l.name).toBeDefined();
+      expect(mesh!.weights[0]![headBone.id]).toBe(1);
+    }
+    const blinkParams = model.keyforms.map((k) => `${model.layers.find((l) => l.id === k.layerId)!.name}:${k.param}`);
+    expect(blinkParams.sort()).toEqual([
+      "eye-white-left:eye_l_open",
+      "eye-white-right:eye_r_open",
+      "eyelash-top-left:eye_l_open",
+      "eyelash-top-right:eye_r_open",
+    ]);
     // The whole pass is one undo step.
     history.undo(model);
     expect(model.bones.length).toBe(0);
     expect(model.rig).toBeNull();
+    expect(model.keyforms.length).toBe(0);
+  });
+
+  it("re-running the face pass replaces the blink keyforms instead of stacking them", () => {
+    const { model, px } = fullModel();
+    const history = new History();
+    const opts = { classify: true, skeleton: true, bindings: true, meshes: true, physics: true, face: true };
+    history.execute(model, runAutoRig(model, px, opts).cmd);
+    const firstMeshes = model.layers.filter((l) => l.slot === "eye_white").map((l) => l.mesh);
+    history.execute(model, runAutoRig(model, px, { ...opts, skeleton: false }).cmd);
+    expect(model.keyforms.length).toBe(4);
+    // Existing eye meshes (and any hand edits to them) are kept.
+    expect(model.layers.filter((l) => l.slot === "eye_white").map((l) => l.mesh)).toEqual(firstMeshes);
   });
 
   it("re-running with only physics checked keeps hand edits elsewhere", () => {

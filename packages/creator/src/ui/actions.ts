@@ -1,6 +1,8 @@
 // Shared UI actions used by both the toolbar and keyboard shortcuts.
 
-import { deleteBone, replaceMeshGeometry, setBoneField } from "../state/ops";
+import type { OarKeyformKey, Vec2 } from "@oar/core";
+import { composite, deleteBone, replaceMeshGeometry, setBoneField, setKeyformKeys } from "../state/ops";
+import type { Command } from "../state/undo";
 import { deleteVertexAt } from "../state/meshOps";
 import { useStore } from "../state/store";
 
@@ -50,9 +52,25 @@ export function deleteSelected(): void {
       }
       current = { ...current, ...next };
     }
-    s.execute(
-      replaceMeshGeometry(mesh.id, current, `delete ${doomed.length} vertex${doomed.length === 1 ? "" : "es"}`),
-    );
+    const label = `delete ${doomed.length} vertex${doomed.length === 1 ? "" : "es"}`;
+    // Deleting compacts the vertex numbering; keyform offsets are keyed by
+    // index, so renumber them in the same undo step or every key scrambles.
+    const cmds: Command[] = [replaceMeshGeometry(mesh.id, current, label)];
+    const gone = new Set(doomed);
+    const shift = (i: number) => i - doomed.filter((d) => d < i).length;
+    for (const kf of s.model.keyforms) {
+      if (kf.meshId !== mesh.id) continue;
+      const keys: OarKeyformKey[] = kf.keys.map((k) => {
+        const offsets: Record<string, Vec2> = {};
+        for (const [idx, o] of Object.entries(k.offsets)) {
+          const i = Number(idx);
+          if (!gone.has(i)) offsets[String(shift(i))] = o;
+        }
+        return { ...k, offsets };
+      });
+      cmds.push(setKeyformKeys(kf.id, keys, "renumber keyform"));
+    }
+    s.execute(cmds.length === 1 ? cmds[0]! : composite(label, cmds));
     s.setMeshEdit({ vertices: [] });
     return;
   }

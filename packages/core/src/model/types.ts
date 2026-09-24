@@ -73,6 +73,27 @@ export interface OarCorrective {
   offsets: Record<string, Vec2>; // vertex index -> offset
 }
 
+/** One key of a keyform: the layer's shape at `value` of the parameter. */
+export interface OarKeyformKey {
+  value: number;
+  offsets: Record<string, Vec2>; // vertex index -> offset from rest, REST space
+  opacity: number; // multiplies layer opacity, 0..1
+}
+
+/** Live2D-style keyform: a layer's deformation (and opacity) authored at key
+ *  values of one driver parameter, linearly interpolated between neighbouring
+ *  keys. Offsets are in rest space and applied BEFORE skinning, so the shape
+ *  rides every bone transform. `meshId` pins the vertex numbering — a
+ *  keyform whose mesh was replaced is ignored rather than scrambled. */
+export interface OarKeyform {
+  id: string;
+  name: string;
+  layerId: string;
+  meshId: string;
+  param: string;
+  keys: OarKeyformKey[]; // sorted by value ascending
+}
+
 export interface OarRigEye {
   white: string | null;
   iris: string | null;
@@ -108,6 +129,7 @@ export interface OarManifest {
   bones: OarBone[];
   meshes: OarMesh[];
   correctives: OarCorrective[];
+  keyforms: OarKeyform[]; // absent in older files; readers default it to []
   rig: OarRig | null;
   params: Record<string, number>; // rig tuning params (blinkFloor, mouthGain, ...)
   editor?: Record<string, unknown>; // stripped by "Export for studio"
@@ -150,6 +172,7 @@ export function emptyManifest(name: string, canvas: OarCanvas): OarManifest {
     bones: [],
     meshes: [],
     correctives: [],
+    keyforms: [],
     rig: null,
     params: {},
   };

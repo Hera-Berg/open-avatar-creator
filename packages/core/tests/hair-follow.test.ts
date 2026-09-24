@@ -1,3 +1,4 @@
+import { RIG_PARAM_DEFAULTS } from "../src/model/params";
 import { describe, it, expect } from "vitest";
 import { solveModel, createSolveContext } from "../src/solve";
 import { headTurnX } from "../src/headturn/warp";
@@ -36,13 +37,13 @@ describe("hair warp follow", () => {
     const headMesh = ctx.meshCache.get("l_head")!;
     hairMesh.vertices.forEach(([rx], i) => {
       const u = Math.max(-3, Math.min(3, (rx - 450) / 150));
-      const expected = headTurnX(u, angle, 450, 150, 1) + parallaxFor(1);
+      const expected = headTurnX(u, angle, 450, 150, RIG_PARAM_DEFAULTS.headTurnDepth) + parallaxFor(1);
       expect(hair.positions[i]![0]).toBeCloseTo(expected, 1);
     });
     // Same rest x → same warped x as the head (the weld, parallax aside).
     headMesh.vertices.forEach(([rx], i) => {
       const u = Math.max(-3, Math.min(3, (rx - 450) / 150));
-      expect(head.positions[i]![0]).toBeCloseTo(headTurnX(u, angle, 450, 150, 1), 1);
+      expect(head.positions[i]![0]).toBeCloseTo(headTurnX(u, angle, 450, 150, RIG_PARAM_DEFAULTS.headTurnDepth), 1);
     });
   });
 
@@ -54,7 +55,7 @@ describe("hair warp follow", () => {
     const hairMesh = ctx.meshCache.get("l_hair")!;
     hairMesh.vertices.forEach(([rx], i) => {
       const u = Math.max(-3, Math.min(3, (rx - 450) / 150));
-      const full = headTurnX(u, angle, 450, 150, 1) - rx;
+      const full = headTurnX(u, angle, 450, 150, RIG_PARAM_DEFAULTS.headTurnDepth) - rx;
       expect(hair.positions[i]![0]).toBeCloseTo(rx + full * 0.6 + parallaxFor(1), 1);
     });
   });
@@ -69,7 +70,7 @@ describe("hair warp follow", () => {
     const hairMesh = ctx.meshCache.get("l_hair")!;
     const rx = hairMesh.vertices[0]![0];
     const u = Math.max(-3, Math.min(3, (rx - 450) / 150));
-    const expected = headTurnX(u, angle, 450, 150, 1) + 4 * Math.sin(angle) * 3;
+    const expected = headTurnX(u, angle, 450, 150, RIG_PARAM_DEFAULTS.headTurnDepth) + 4 * Math.sin(angle) * 3;
     expect(hair.positions[0]![0]).toBeCloseTo(expected, 1);
   });
 });

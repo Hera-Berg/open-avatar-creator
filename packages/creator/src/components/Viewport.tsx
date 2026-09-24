@@ -6,6 +6,7 @@ import {
   clamp,
   dominantParam,
   invertedTriangles,
+  keyIndexAt,
   newId,
   solveSkeleton,
   type OarBone,
@@ -25,6 +26,7 @@ import {
   setVerticesAbsolute,
   replaceMeshGeometry,
   addCorrective,
+  setKeyformKeys,
 } from "../state/ops";
 import { addVertexAt, deleteVertexAt } from "../state/meshOps";
 
@@ -318,7 +320,9 @@ export function Viewport() {
         drag.moved = true;
         const me = meshForEdit();
         if (!me) break;
-        if (playback.paused) {
+        if (applyKeyformDeltas(drag.indices, drag.indices.map(() => [dx, dy] as Vec2))) {
+          // Editing a keyform: the drag shaped the key at the current value.
+        } else if (playback.paused) {
           // Paused edits become (or update) a corrective keyed to the pose.
           applyPausedDelta(me.layer.id, drag, dx, dy);
         } else {
@@ -407,6 +411,58 @@ export function Viewport() {
     void layerId;
   };
 
+  /** Canvas-space delta → the layer's rest space at vertex `vi`: undo the
+   *  linear part of its skinning, so a key drawn with the head tilted still
+   *  lands where the cursor went. (Keyform offsets apply before skinning.) */
+  const toRestDelta = (layerId: string, vi: number, d: Vec2): Vec2 => {
+    const m = useStore.getState().model;
+    const layer = m.layers.find((l) => l.id === layerId);
+    const mesh = layer?.mesh ? m.meshes.find((x) => x.id === layer.mesh) : null;
+    const worlds = boneWorlds(m, driverAngle());
+    let a = 0, b = 0, c = 0, dd = 0, total = 0;
+    const weights = mesh?.weights[vi] ?? {};
+    const entries = Object.entries(weights).filter(([, w]) => w > 0);
+    const blend = entries.length > 0 ? entries : layer?.boneId ? [[layer.boneId, 1] as [string, number]] : [];
+    for (const [boneId, w] of blend) {
+      const mat = worlds.get(boneId)?.mat;
+      if (!mat) continue;
+      a += w * mat[0]; b += w * mat[1]; c += w * mat[2]; dd += w * mat[3]; total += w;
+    }
+    if (total === 0) return d;
+    a /= total; b /= total; c /= total; dd /= total;
+    const det = a * dd - b * c;
+    if (Math.abs(det) < 1e-9) return d;
+    return [(dd * d[0] - c * d[1]) / det, (-b * d[0] + a * d[1]) / det];
+  };
+
+  /** Route vertex deltas into the active keyform's key at the current
+   *  parameter value. Returns false when no keyform is being edited (the
+   *  caller then edits the base mesh / corrective as before). */
+  const applyKeyformDeltas = (indices: number[], deltas: Vec2[]): boolean => {
+    const s = useStore.getState();
+    const ke = s.keyformEdit;
+    const me = meshForEdit();
+    if (!ke || !me) return false;
+    const kf = s.model.keyforms.find((k) => k.id === ke.keyformId);
+    if (!kf || kf.layerId !== me.layer.id || kf.meshId !== me.mesh.id) return false;
+    const value = engineHolder.current?.frame.params[kf.param as keyof typeof playback.manual] ?? 0;
+    const ki = keyIndexAt(kf, value);
+    if (ki < 0) {
+      s.setToast(`${kf.param} = ${value.toFixed(2)} is between keys — click a key or "Add key here"`);
+      return true;
+    }
+    const key = kf.keys[ki]!;
+    const offsets = { ...key.offsets };
+    indices.forEach((vi, k) => {
+      const d = toRestDelta(me.layer.id, vi, deltas[k]!);
+      const prev = offsets[String(vi)] ?? [0, 0];
+      offsets[String(vi)] = [prev[0] + d[0], prev[1] + d[1]];
+    });
+    const keys = kf.keys.map((k, i) => (i === ki ? { ...k, offsets } : k));
+    s.execute(setKeyformKeys(kf.id, keys, `shape ${kf.param} key ${key.value.toFixed(2)}`, true));
+    return true;
+  };
+
   const softMoveDelta = (layerId: string, at: Vec2, dx: number, dy: number) => {
     const s = useStore.getState();
     const me = meshForEdit();
@@ -415,6 +471,7 @@ export function Viewport() {
     const positions = solvedPositionsFor(layerId) ?? me.mesh.vertices;
     const indices: number[] = [];
     const next: Vec2[] = [];
+    const deltas: Vec2[] = [];
     for (let i = 0; i < me.mesh.vertices.length; i++) {
       const p = positions[i]!;
       const d = Math.hypot(p[0] - at[0], p[1] - at[1]);
@@ -422,9 +479,11 @@ export function Viewport() {
       const w = 1 - d / radius;
       const k = w * w * (3 - 2 * w);
       indices.push(i);
+      deltas.push([dx * k, dy * k]);
       const v = me.mesh.vertices[i]!;
       next.push([v[0] + dx * k, v[1] + dy * k]);
     }
+    if (indices.length > 0 && applyKeyformDeltas(indices, deltas)) return;
     if (indices.length > 0) {
       s.execute(setVerticesAbsolute(me.mesh.id, indices, next, `soft move ${indices.length} vertices`, `soft-drag:${me.mesh.id}`));
     }
@@ -647,6 +706,15 @@ export function Viewport() {
 
   const canBind = selection.bones.length === 1 && selection.layers.length > 0;
 
+  const keyformStatus = () => {
+    const ke = useStore.getState().keyformEdit;
+    const kf = ke ? model.keyforms.find((k) => k.id === ke.keyformId) : null;
+    if (!kf) return null;
+    const value = engineHolder.current?.frame.params[kf.param as keyof typeof playback.manual] ?? 0;
+    const on = keyIndexAt(kf, value) >= 0;
+    return `◆ ${kf.param} ${value.toFixed(2)}${on ? " (key)" : " (between keys)"} · `;
+  };
+
   return (
     <div className="viewport" ref={containerRef}>
       <canvas ref={canvasRef} className="glcanvas" />
@@ -720,6 +788,7 @@ export function Viewport() {
         <button onClick={() => useStore.getState().fitCamera(size.w, size.h)} title="Fit view (F)">Fit</button>
       </div>
       <div className="viewport-status">
+        {keyformStatus()}
         {playback.paused ? "⏸ paused" : playback.demo ? "▶ demo" : playback.connection === "connected" ? "● live" : "idle"}
         {engineHolder.current ? ` · ${engineHolder.current.frame.fps.toFixed(0)} fps` : ""}
       </div>

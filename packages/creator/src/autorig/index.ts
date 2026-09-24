@@ -17,6 +17,7 @@ import {
 } from "@oar/core";
 import { classifyLayer } from "../import/classify";
 import { buildFaceRig, type FaceRigResult } from "../rig/faceRig";
+import { buildBlinkCommands } from "../rig/blink";
 import {
   addLayer,
   addMesh,
@@ -418,6 +419,10 @@ export function runAutoRig(
       cmds.push(setRigParam("mouthRangeLower", faceRig.suggestedParams.mouthRangeLower, false));
     }
     cmds.push(setRig(faceRig.rig, "build face rig"));
+    // The blink is keyforms on the eye layers — editable like any mesh.
+    const blink = buildBlinkCommands(model, pixels, faceRig.rig, headBone?.id ?? null);
+    cmds.push(...blink.cmds);
+    warnings.push(...blink.warnings);
     cavityPixels = faceRig.cavityPixels;
   }
 

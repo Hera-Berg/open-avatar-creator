@@ -6,6 +6,8 @@ import {
   newId,
   type OarBone,
   type OarCorrective,
+  type OarKeyform,
+  type OarKeyformKey,
   type OarLayer,
   type OarManifest,
   type OarMesh,
@@ -517,6 +519,41 @@ export function addCorrective(corrective: OarCorrective): Command {
 
 export function deleteCorrective(id: string): Command | null {
   return removeCommand("delete corrective", (m) => m.correctives, id);
+}
+
+// ---------------------------------------------------------------- keyforms
+
+export function addKeyform(keyform: OarKeyform): Command {
+  return insertCommand(`keyform ${keyform.name}`, (m) => m.keyforms, keyform);
+}
+
+export function deleteKeyform(id: string): Command | null {
+  return removeCommand("delete keyform", (m) => m.keyforms, id);
+}
+
+/** Replace a keyform's keys. Drags coalesce into one undo step per keyform. */
+export function setKeyformKeys(
+  id: string,
+  keys: OarKeyformKey[],
+  label = "edit keyform",
+  coalesce = false,
+): Command {
+  let before: OarKeyformKey[] | null = null;
+  const next = JSON.parse(JSON.stringify(keys)) as OarKeyformKey[];
+  return makeCommand({
+    label,
+    apply: (m) => {
+      const kf = m.keyforms.find((k) => k.id === id);
+      if (!kf) return;
+      if (!before) before = JSON.parse(JSON.stringify(kf.keys)) as OarKeyformKey[];
+      kf.keys = JSON.parse(JSON.stringify(next)) as OarKeyformKey[];
+    },
+    revert: (m) => {
+      const kf = m.keyforms.find((k) => k.id === id);
+      if (kf && before) kf.keys = JSON.parse(JSON.stringify(before)) as OarKeyformKey[];
+    },
+    ...(coalesce ? { coalesceKey: `keyform-keys:${id}` } : {}),
+  });
 }
 
 // ---------------------------------------------------------------- rig & params

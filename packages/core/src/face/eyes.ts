@@ -2,8 +2,9 @@
 //
 // The classic closed-eye look: the lash line morphs down onto a curve traced
 // from the eye white's own alpha at import — the natural lower boundary of
-// that eye — keeping its natural thickness. The eye interior squashes toward
-// a point 68% down the eye (real lids come down from the top) and fades out.
+// that eye — keeping its natural thickness. The eye interior never shrinks:
+// the white's top edge rides the lash's lower edge down, and the iris (clipped
+// to the white) is covered by the lid rather than squashed — the Live2D look.
 // Lashes stay fully opaque throughout: they *become* the closed lid.
 
 import type { OarLayer, OarRigEye, Vec2 } from "../model/types";
@@ -98,6 +99,46 @@ export interface SolveEyeOpts {
    *  matrix). When set, the lash morph is solved in the head's rest frame so
    *  the closed lash stays welded to the contour under head rotation. */
   frame?: { pre: Mat2D; post: Mat2D } | null;
+  /** false when the blink is authored as keyforms (already applied before
+   *  skinning): only gaze runs here. Default true — the procedural blink for
+   *  models without blink keyforms. */
+  blink?: boolean;
+}
+
+/**
+ * The upper lid's current lower edge, per rest-space column: exactly where
+ * the lash morph below puts the lash's lower-edge vertices for this `shut`.
+ * Null when there is nothing to derive a lid from.
+ */
+function lidLine(
+  rigEye: OarRigEye,
+  runtime: EyeRuntime,
+  lash: WorkingLayer | undefined,
+  whiteRest: OarLayer | null,
+  shut: number,
+): ((x: number) => number) | null {
+  const k = smoothstep01(shut);
+  const contour = rigEye.lidContour.length >= 2 ? rigEye.lidContour : null;
+  const lashLower = runtime.lashLower && runtime.lashLower.length >= 2 ? runtime.lashLower : null;
+  if (lash && contour && lashLower) {
+    // Lower-edge verts have zero thickness, so they land on the contour
+    // whatever the invert amount.
+    return (x) => lerp(sampleContour(lashLower, x)!, sampleContour(contour, x)!, k);
+  }
+  if (lash) {
+    // Mirrors the fallback lash morph for its lower-edge verts.
+    const restBox = bbox(lash.restVerts);
+    const eyeH = whiteRest ? whiteRest.height : restBox.height;
+    const travel = shut * eyeH * 0.55;
+    return (x) => (lashLower ? sampleContour(lashLower, x)! : restBox.y + restBox.height) + travel;
+  }
+  if (whiteRest) {
+    // No lash: an invisible lid sweeping from the white's top to its bottom.
+    const top = whiteRest.y;
+    const bottom = whiteRest.y + whiteRest.height;
+    return (x) => lerp(top, contour ? sampleContour(contour, x)! : bottom, k);
+  }
+  return null;
 }
 
 /**
@@ -115,7 +156,9 @@ export function solveEye(
 ): void {
   const invertAmt = opts.invert ?? 0;
   const frame = opts.frame ?? null;
-  const shut = 1 - clamp(open);
+  // Keyformed blink: the lid is already where the artist put it.
+  const shut = opts.blink === false ? 0 : 1 - clamp(open);
+  if (opts.blink === false) open = 1;
   const white = rigEye.white ? working.get(rigEye.white) : undefined;
   const iris = rigEye.iris ? working.get(rigEye.iris) : undefined;
   const shine = rigEye.shine ? working.get(rigEye.shine) : undefined;
@@ -127,22 +170,35 @@ export function solveEye(
     ? (working.get(rigEye.white)?.layer ?? null)
     : null;
 
-  // 1. Interior: squash toward a point 68% down the eye, fading out as the
-  //    lid descends — fully visible above open≈0.75, gone below open≈0.3 so
-  //    the iris never shows through under the landed lash.
-  const interiorAlpha = clamp((open - 0.3) / 0.45);
-  const squash = (wl: WorkingLayer) => {
-    if (shut <= 0) return;
-    const box = bbox(wl.positions);
-    const py = box.y + box.height * 0.68;
-    const scale = 1 - shut;
-    for (const p of wl.positions) {
-      p[1] = py + (p[1] - py) * scale;
+  // 1. Interior: the lid slides down OVER the eye; nothing shrinks. The
+  //    white's top edge is pushed down to the lash's current lower edge
+  //    (vertices below the lid are untouched), and the iris/shine keep their
+  //    size — they are stencil-clipped to the white, so the descending lid
+  //    covers them from the top like a Live2D eye. Only the last sliver fades,
+  //    so nothing shows through under the landed lash.
+  const lidY = lidLine(rigEye, runtime, lash, whiteRest, shut);
+  const interiorAlpha = clamp(open / 0.15);
+  const cover = (wl: WorkingLayer) => {
+    if (shut <= 0 || !lidY) return;
+    for (let i = 0; i < wl.positions.length; i++) {
+      const y = lidY(wl.restVerts[i]![0]);
+      const p = wl.positions[i]!;
+      if (frame) {
+        const local = matApply(frame.pre, p[0], p[1]);
+        if (local[1] >= y) continue;
+        const back = matApply(frame.post, local[0], y);
+        p[0] = back[0];
+        p[1] = back[1];
+      } else if (p[1] < y) {
+        p[1] = y;
+      }
     }
   };
   for (const wl of [white, iris, shine]) {
     if (!wl) continue;
-    squash(wl);
+    // Clipped layers are covered through the white; an unclipped iris (old
+    // models) is covered directly so it never pokes out above the lid.
+    if (wl === white || !wl.layer.clipTo) cover(wl);
     wl.alpha *= interiorAlpha;
   }
 
@@ -220,7 +276,7 @@ export function solveEye(
 
   // 4. Drawn closed artwork wins over any procedural approximation;
   //    cross-fade over the last 25% of the close so the swap is not a pop.
-  if (closed) {
+  if (closed && opts.blink !== false) {
     const xfade = clamp((shut - 0.75) / 0.25);
     closed.alpha *= xfade;
     const remain = 1 - xfade;

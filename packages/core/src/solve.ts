@@ -16,6 +16,8 @@ import {
 import { solveSkeleton, skinVertices, rigidTransform } from "./skeleton/solve";
 import { apply as matApply, invert, IDENTITY } from "./geometry/mat2d";
 import { applyCorrectives } from "./correctives";
+import { applyKeyforms } from "./keyforms";
+import { blinkLayerIds } from "./keyforms/blink";
 import {
   type LayerPhysicsState,
   type PhysicsGlobals,
@@ -122,7 +124,9 @@ function resolveMesh(layer: OarLayer, ctx: SolveContext): OarMesh {
   if (!grid) {
     if (layer.slot && EYE_SLOTS.has(layer.slot)) {
       const cols = clamp(Math.round(layer.width / 10), 8, 64);
-      const rows = clamp(Math.round(layer.height / 10), 4, 32);
+      // Rows matter too: the lid line sweeps down through the white, and
+      // a vertex row every ~5px keeps the covered texture from smearing.
+      const rows = clamp(Math.round(layer.height / 5), 6, 32);
       grid = subdivideQuad(layer.id, layer.x, layer.y, layer.width, layer.height, cols, rows);
     } else {
       const n = clamp(Math.round(Math.max(layer.width, layer.height) / 140), 3, 14);
@@ -214,14 +218,18 @@ export function solveModel(
   // 2. Skin every layer.
   const working = new Map<string, WorkingLayer>();
   const meshByLayer = new Map<string, OarMesh>();
+  //    Keyforms deform the rest shape first (Live2D order: parameter
+  //    deformation in the part's own space, then the parent transform).
+  const keyforms = model.keyforms ?? [];
   for (const layer of model.layers) {
     const mesh = resolveMesh(layer, ctx);
     meshByLayer.set(layer.id, mesh);
-    const rest = mesh.vertices;
+    const kf = applyKeyforms(keyforms, layer.id, layer.mesh, mesh.vertices, p);
+    const rest = kf.vertices ?? mesh.vertices;
     let positions: Vec2[];
     const hasWeights = mesh.weights.some((w) => Object.keys(w).length > 0);
     if (hasWeights) {
-      positions = skinVertices(mesh, world);
+      positions = skinVertices(kf.vertices ? { ...mesh, vertices: rest } : mesh, world);
     } else if (layer.boneId) {
       const mat = rigidTransform(layer.boneId, world);
       positions = rest.map((v) => matApply(mat, v[0], v[1]));
@@ -233,9 +241,9 @@ export function solveModel(
     }
     working.set(layer.id, {
       layer,
-      restVerts: rest,
+      restVerts: mesh.vertices,
       positions,
-      alpha: layer.visible ? layer.opacity : 0,
+      alpha: layer.visible ? layer.opacity * kf.opacity : 0,
     });
   }
 
@@ -258,6 +266,15 @@ export function solveModel(
 
   // 4. Face: eyes and brows.
   if (model.rig) {
+    // An eye whose blink is authored as keyforms is done blinking by now;
+    // the procedural blink only remains for models without them.
+    const keyformed = (eye: typeof model.rig.eyes.left, param: string) => {
+      const ids = new Set(blinkLayerIds(eye));
+      return keyforms.some((k) => {
+        if (k.param !== param || !ids.has(k.layerId)) return false;
+        return working.get(k.layerId)?.layer.mesh === k.meshId;
+      });
+    };
     const eyeOpts = { invert: rigParam(rp, "lashInvert"), frame: headFrame };
     solveEye(
       model.rig.eyes.left,
@@ -266,7 +283,7 @@ export function solveModel(
       p.eye_l_open,
       p.gaze_x,
       p.gaze_y,
-      eyeOpts,
+      { ...eyeOpts, blink: !keyformed(model.rig.eyes.left, "eye_l_open") },
     );
     solveEye(
       model.rig.eyes.right,
@@ -275,7 +292,7 @@ export function solveModel(
       p.eye_r_open,
       p.gaze_x,
       p.gaze_y,
-      eyeOpts,
+      { ...eyeOpts, blink: !keyformed(model.rig.eyes.right, "eye_r_open") },
     );
   }
   for (const layer of model.layers) {
@@ -354,6 +371,7 @@ export function solveModel(
     const pitchAngle = p.head_pitch * degToRad(rigParam(rp, "headPitchDeg"));
     const headOrder = headLayer ? headLayer.order : 0;
     const hairFollow = rigParam(rp, "hairWarpFollow");
+    const turnDepth = rigParam(rp, "headTurnDepth");
     // The cylinder warp must be applied in the head's LOCAL frame. When the
     // head is rolled, a canvas-axis warp both rotates and compresses on the
     // wrong axis — the yaw+roll shear. The exact local frame is the head
@@ -388,7 +406,7 @@ export function solveModel(
         for (const pt of wl.positions) {
           warpInFrame(pt, layer, (p) => {
             const u = clamp((p[0] - headRig.centre[0]) / headRig.radius[0], -3, 3);
-            const warped = headTurnX(u, yawAngle, headRig.centre[0], headRig.radius[0], 1);
+            const warped = headTurnX(u, yawAngle, headRig.centre[0], headRig.radius[0], turnDepth);
             if (isHair && hairFollow < 0.999) {
               // Optional blend for rigs that want hair to keep more volume.
               return [p[0] + (warped - p[0]) * hairFollow, p[1]];
@@ -408,7 +426,7 @@ export function solveModel(
         for (const pt of wl.positions) {
           warpInFrame(pt, layer, (p2) => {
             const v = clamp((p2[1] - headRig.centre[1]) / headRig.radius[1], -3, 3);
-            const warped = headTurnX(v, pitchAngle, headRig.centre[1], headRig.radius[1], 1);
+            const warped = headTurnX(v, pitchAngle, headRig.centre[1], headRig.radius[1], turnDepth);
             return [p2[0], warped];
           });
         }
@@ -439,14 +457,14 @@ export function solveModel(
           if (Math.abs(yawAngle) > 1e-6) {
             warpInFrame(pt, layer, (p) => {
               const u = clamp((p[0] - headRig.centre[0]) / headRig.radius[0], -3, 3);
-              const warped = headTurnX(u, yawAngle, headRig.centre[0], headRig.radius[0], 1);
+              const warped = headTurnX(u, yawAngle, headRig.centre[0], headRig.radius[0], turnDepth);
               return [p[0] + (warped - p[0]) * t, p[1]];
             });
           }
           if (Math.abs(pitchAngle) > 1e-6) {
             warpInFrame(pt, layer, (p2) => {
               const v = clamp((p2[1] - headRig.centre[1]) / headRig.radius[1], -3, 3);
-              const warped = headTurnX(v, pitchAngle, headRig.centre[1], headRig.radius[1], 1);
+              const warped = headTurnX(v, pitchAngle, headRig.centre[1], headRig.radius[1], turnDepth);
               return [p2[0], p2[1] + (warped - p2[1]) * t];
             });
           }

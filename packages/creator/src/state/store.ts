@@ -87,6 +87,10 @@ interface CreatorStore {
     restBefore: Vec2[];
   } | null;
 
+  /** Keyform being edited: vertex drags write into its key at the current
+   *  parameter value (Live2D: select a key, then deform). */
+  keyformEdit: { keyformId: string } | null;
+
   importState: {
     active: boolean;
     current: string;
@@ -115,6 +119,7 @@ interface CreatorStore {
   setDebugFeed: (on: boolean) => void;
   setNamingGuideOpen: (open: boolean) => void;
   setCorrectiveDraft: (draft: CreatorStore["correctiveDraft"]) => void;
+  setKeyformEdit: (edit: CreatorStore["keyformEdit"]) => void;
   setImportState: (state: CreatorStore["importState"]) => void;
   setStudioProblems: (problems: string[] | null) => void;
   setAutoRigOpen: (open: boolean) => void;
@@ -142,6 +147,7 @@ export const useStore = create<CreatorStore>((set, get) => ({
   toast: null,
   namingGuideOpen: false,
   correctiveDraft: null,
+  keyformEdit: null,
   importState: null,
   studioProblems: null,
   autoRigOpen: false,
@@ -202,6 +208,8 @@ export const useStore = create<CreatorStore>((set, get) => ({
       history,
       selection: { bones: [], layers: [] },
       meshEdit: { layerId: null, vertices: [], soft: false, softRadius: 60 },
+      keyformEdit: null,
+      correctiveDraft: null,
       modelVersion: get().modelVersion + 1,
       undoLabel: null,
       redoLabel: null,
@@ -259,6 +267,7 @@ export const useStore = create<CreatorStore>((set, get) => ({
   setDebugFeed: (debugFeed) => set({ debugFeed }),
   setNamingGuideOpen: (namingGuideOpen) => set({ namingGuideOpen }),
   setCorrectiveDraft: (correctiveDraft) => set({ correctiveDraft }),
+  setKeyformEdit: (keyformEdit) => set({ keyformEdit }),
   setImportState: (importState) => set({ importState }),
   setStudioProblems: (studioProblems) => set({ studioProblems }),
   setAutoRigOpen: (autoRigOpen) => set({ autoRigOpen }),
