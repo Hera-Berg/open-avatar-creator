@@ -52,6 +52,55 @@ export function headTurnX(
   return centreX + (u + d * Math.sin(angle) * turnBump(u)) * radius;
 }
 
+// Head pitch: the nod. A near-uniform vertical slide (the yaw bump applied to
+// y) reads as the face pasted on and dragged up and down — nothing
+// foreshortens. A head nodding forward is a sphere rotating: the front of the
+// face (eyes, nose, mouth) travels furthest, the silhouette (crown, chin,
+// cheek outline) barely moves. So the pitch displacement is sampled from a
+// face SURFACE — a radial bump over both axes:
+//
+//   y' = centre + (v + depth · sin φ · s(u, v)) · radius
+//   s(u, v) = (1 − r²/P²)²   r² = u² + v²,  P = PITCH_SUPPORT
+//
+// Nodding down, the features drop while the chin holds: the lower face
+// compresses and more crown shows — the Live2D look-down. Hair and features
+// ride the same surface, so bang tips at eye level travel with the eyes (no
+// swallowing) and the head keeps its height (s is symmetric in v). The depth
+// is capped exactly like the yaw warp so the map never folds along v.
+
+/** Support radius of the pitch surface bump, in face radii. */
+export const PITCH_SUPPORT = 1.6;
+/** max |∂s/∂v|: 8 / (3√3 · P), reached on the u = 0 column. */
+const S_SLOPE_MAX = 8 / (3 * Math.sqrt(3) * PITCH_SUPPORT);
+
+export function pitchSurface(u: number, v: number): number {
+  const r2 = (u * u + v * v) / (PITCH_SUPPORT * PITCH_SUPPORT);
+  if (r2 >= 1) return 0;
+  const s = 1 - r2;
+  return s * s;
+}
+
+/** The pitch depth actually applied: `depth`, capped so the nod stays
+ *  monotonic along v at every u. */
+export function safePitchDepth(angle: number, depth: number): number {
+  const sin = Math.abs(Math.sin(angle));
+  if (sin < 1e-9) return depth;
+  return Math.max(0, Math.min(depth, (1 - MIN_SCALE) / (sin * S_SLOPE_MAX)));
+}
+
+/** Vertical nod of the point (u, v) (face radii from the head centre). */
+export function headPitchY(
+  u: number,
+  v: number,
+  angle: number,
+  centreY: number,
+  radius: number,
+  depth = 1.5,
+): number {
+  const d = safePitchDepth(angle, depth);
+  return centreY + (v + d * Math.sin(angle) * pitchSurface(u, v)) * radius;
+}
+
 /** Test helper: the mapping must strictly increase across u at any angle. */
 export function isMonotonic(
   angle: number,

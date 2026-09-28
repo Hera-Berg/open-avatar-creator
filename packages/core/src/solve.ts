@@ -34,7 +34,7 @@ import {
   layerRectOf,
   APERTURE_ROWS,
 } from "./face/mouth";
-import { headTurnX } from "./headturn/warp";
+import { headTurnX, headPitchY, safePitchDepth } from "./headturn/warp";
 import { subdivideQuad } from "./geometry/triangulate";
 import { clamp, degToRad, radToDeg, smoothstep01 } from "./geometry/util";
 
@@ -94,6 +94,15 @@ export const HEAD_WARP_SLOTS = new Set([
   "hair_side",
 ]);
 
+// Pitch depth offsets, in shares of the face-front nod travel. Ears sit on
+// the head's rotation axis, behind the face: nodding down, the face front
+// drops past them, so they read as rising. Everything else rides the face
+// surface (hair included — the helmet rule).
+const PITCH_PARALLAX: Record<string, number> = {
+  ear: -0.35,
+  ear_fox: -0.2,
+};
+
 // Depth parallax is for HAIR only. Face features sit ON the face — sliding
 // them relative to it by layer order is exactly the "eyes cut out of the
 // face" failure; hair sliding against hair is the depth look we want.
@@ -127,6 +136,12 @@ function resolveMesh(layer: OarLayer, ctx: SolveContext): OarMesh {
       // Rows matter too: the lid line sweeps down through the white, and
       // a vertex row every ~5px keeps the covered texture from smearing.
       const rows = clamp(Math.round(layer.height / 5), 6, 32);
+      grid = subdivideQuad(layer.id, layer.x, layer.y, layer.width, layer.height, cols, rows);
+    } else if (layer.slot === "head") {
+      // The face takes the curved pitch surface; a coarse grid renders it as
+      // kinks and lets the skin drift from the features riding on it.
+      const cols = clamp(Math.round(layer.width / 24), 6, 20);
+      const rows = clamp(Math.round(layer.height / 24), 6, 20);
       grid = subdivideQuad(layer.id, layer.x, layer.y, layer.width, layer.height, cols, rows);
     } else {
       const n = clamp(Math.round(Math.max(layer.width, layer.height) / 140), 3, 14);
@@ -169,9 +184,31 @@ function physicsGlobalsFor(
   };
 }
 
-function pivotOf(
+/** Where a rest-space point sits now: moved with the displacement of the
+ *  layer's nearest rest vertex. A custom pivot is authored on the rest pose
+ *  and must ride the layer (head roll, turn warp) — left fixed in canvas
+ *  space, the swing gains a spurious translation whenever the layer moves. */
+export function followRestPoint(point: Vec2, restVerts: Vec2[], positions: Vec2[]): Vec2 {
+  let best = -1;
+  let bestD = Infinity;
+  for (let i = 0; i < restVerts.length; i++) {
+    const d = (restVerts[i]![0] - point[0]) ** 2 + (restVerts[i]![1] - point[1]) ** 2;
+    if (d < bestD) {
+      bestD = d;
+      best = i;
+    }
+  }
+  if (best < 0) return [point[0], point[1]];
+  return [
+    point[0] + positions[best]![0] - restVerts[best]![0],
+    point[1] + positions[best]![1] - restVerts[best]![1],
+  ];
+}
+
+export function pivotOf(
   layer: OarLayer,
   positions: Vec2[],
+  restVerts: Vec2[] = positions,
 ): { x: number; y: number } {
   let minX = Infinity;
   let minY = Infinity;
@@ -192,10 +229,11 @@ function pivotOf(
       return { x: cx, y: minY };
     case "bottom":
       return { x: cx, y: maxY };
-    case "custom":
-      return p.customPivot
-        ? { x: p.customPivot[0], y: p.customPivot[1] }
-        : { x: cx, y: minY };
+    case "custom": {
+      if (!p.customPivot) return { x: cx, y: minY };
+      const [x, y] = followRestPoint(p.customPivot, restVerts, positions);
+      return { x, y };
+    }
     default:
       return { x: cx, y: cy };
   }
@@ -208,6 +246,14 @@ export function solveModel(
 ): SolvedModel {
   const p = withDriverDefaults(paramsIn);
   const rp = model.params;
+
+  // Downcast eyes: gazing down lowers the upper lids a little. Folded into
+  // the openness so keyformed and procedural blinks both follow.
+  const lidDrop = clamp(rigParam(rp, "gazeLidDrop") * Math.max(0, -p.gaze_y), 0, 0.9);
+  if (lidDrop > 0) {
+    p.eye_l_open *= 1 - lidDrop;
+    p.eye_r_open *= 1 - lidDrop;
+  }
 
   // 1. Spine driver: head roll + horizontal lean bend the chain.
   const driverAngle =
@@ -372,6 +418,17 @@ export function solveModel(
     const headOrder = headLayer ? headLayer.order : 0;
     const hairFollow = rigParam(rp, "hairWarpFollow");
     const turnDepth = rigParam(rp, "headTurnDepth");
+    const pitchDepth = rigParam(rp, "headPitchDepth");
+    const pitchParallax = rigParam(rp, "headPitchParallax");
+    // The nod, sampled on the face surface at the point's (already yawed)
+    // local position — a turned face nods along its turned front, rather
+    // than the whole head block sliding diagonally.
+    const nod = (pt: Vec2, extra = 0): number => {
+      const u = clamp((pt[0] - headRig.centre[0]) / headRig.radius[0], -3, 3);
+      const v = clamp((pt[1] - headRig.centre[1]) / headRig.radius[1], -3, 3);
+      const y = headPitchY(u, v, pitchAngle, headRig.centre[1], headRig.radius[1], pitchDepth);
+      return y + extra;
+    };
     // The cylinder warp must be applied in the head's LOCAL frame. When the
     // head is rolled, a canvas-axis warp both rotates and compresses on the
     // wrong axis — the yaw+roll shear. The exact local frame is the head
@@ -418,17 +475,12 @@ export function solveModel(
         }
       }
       if (HEAD_WARP_SLOTS.has(slot) && Math.abs(pitchAngle) > 1e-6) {
-        // The nod is the same cylinder warp as the yaw turn, applied to y
-        // about the head's HORIZONTAL axis — full sweep, every head layer
-        // alike (the yaw helmet rule: less reads as the face sliding inside
-        // a helmet). Separable from yaw: yaw moves x, pitch moves y, so a
-        // diagonal pose is exactly post(yawWarp, pitchWarp)pre — no shear.
+        // Every head layer rides the same face surface (hair too — the
+        // helmet rule); ears add their depth counter-move.
+        const front = safePitchTravel(pitchAngle, pitchDepth) * headRig.radius[1];
+        const extra = (PITCH_PARALLAX[slot] ?? 0) * pitchParallax * front;
         for (const pt of wl.positions) {
-          warpInFrame(pt, layer, (p2) => {
-            const v = clamp((p2[1] - headRig.centre[1]) / headRig.radius[1], -3, 3);
-            const warped = headTurnX(v, pitchAngle, headRig.centre[1], headRig.radius[1], turnDepth);
-            return [p2[0], warped];
-          });
+          warpInFrame(pt, layer, (p2) => [p2[0], nod(p2, extra)]);
         }
       }
       if (PARALLAX_SLOTS.has(slot) && Math.abs(yawAngle) > 1e-6) {
@@ -462,11 +514,7 @@ export function solveModel(
             });
           }
           if (Math.abs(pitchAngle) > 1e-6) {
-            warpInFrame(pt, layer, (p2) => {
-              const v = clamp((p2[1] - headRig.centre[1]) / headRig.radius[1], -3, 3);
-              const warped = headTurnX(v, pitchAngle, headRig.centre[1], headRig.radius[1], turnDepth);
-              return [p2[0], p2[1] + (warped - p2[1]) * t];
-            });
+            warpInFrame(pt, layer, (p2) => [p2[0], p2[1] + (nod(p2) - p2[1]) * t]);
           }
         }
       }
@@ -483,7 +531,7 @@ export function solveModel(
     const cfg = layer.physics;
     if (!cfg || !cfg.enabled) continue;
     const wl = working.get(layer.id)!;
-    const pivot = pivotOf(layer, wl.positions);
+    const pivot = pivotOf(layer, wl.positions, wl.restVerts);
     let state = ctx.physics.get(layer.id);
     if (!state) {
       state = createLayerPhysicsState();
@@ -541,6 +589,11 @@ export function solveModel(
     })
     .sort((a, b) => a.order - b.order);
   return { layers };
+}
+
+/** Face-front nod travel at `angle`, in face radii (the surface peak). */
+function safePitchTravel(angle: number, depth: number): number {
+  return safePitchDepth(angle, depth) * Math.sin(angle);
 }
 
 function cy0(canvasHeight: number): number {

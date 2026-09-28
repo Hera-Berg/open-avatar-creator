@@ -7,6 +7,7 @@ import { Renderer } from "@oar/renderer";
 import {
   demoFrame,
   deriveLashLowerEdge,
+  rigParam,
   solveModel,
   withDriverDefaults,
   type DriverParam,
@@ -64,12 +65,13 @@ export class Engine {
 
   connect(url: string, debugUrl: string | null): void {
     this.disconnect();
-    const s = useStore.getState();
     this.client = new TrackerClient({
       url,
       debugUrl,
-      blinkFloor: s.model.params.blinkFloor,
-      mouthGain: s.model.params.mouthGain,
+      adapter: () => {
+        const params = useStore.getState().model.params;
+        return { blinkFloor: rigParam(params, "blinkFloor"), mouthGain: rigParam(params, "mouthGain") };
+      },
       onFrame: (params, input) => {
         if (Object.keys(params).length > 0) {
           this.liveParams = { ...this.liveParams, ...params };

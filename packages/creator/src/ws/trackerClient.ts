@@ -8,6 +8,7 @@ import {
   parseFrame,
   ParamSmoother,
   RIG_PARAM_DEFAULTS,
+  type AdapterOptions,
   type DriverParam,
   type TrackingInput,
 } from "@oar/core";
@@ -17,8 +18,9 @@ export type ConnectionState = "disconnected" | "connecting" | "connected" | "err
 export interface TrackerClientOptions {
   url: string;
   debugUrl: string | null;
-  blinkFloor?: number;
-  mouthGain?: number;
+  /** Read on every frame, so Blink sensitivity / Mouth gain edits apply to a
+   *  live connection immediately rather than on the next reconnect. */
+  adapter?: () => Partial<AdapterOptions>;
   smoothing?: number;
   onFrame: (params: Partial<Record<DriverParam, number>>, input: TrackingInput) => void;
   onState: (state: ConnectionState, detail?: string) => void;
@@ -88,9 +90,10 @@ export class TrackerClient {
   }
 
   private handle(text: string): void {
+    const adapter = this.opts.adapter?.() ?? {};
     const input = parseFrame(text, {
-      blinkFloor: this.opts.blinkFloor ?? RIG_PARAM_DEFAULTS.blinkFloor,
-      mouthGain: this.opts.mouthGain ?? RIG_PARAM_DEFAULTS.mouthGain,
+      blinkFloor: adapter.blinkFloor ?? RIG_PARAM_DEFAULTS.blinkFloor,
+      mouthGain: adapter.mouthGain ?? RIG_PARAM_DEFAULTS.mouthGain,
     });
     if (!input) return;
     if (input.blendshapes) this.lastBlendshapes = input.blendshapes;

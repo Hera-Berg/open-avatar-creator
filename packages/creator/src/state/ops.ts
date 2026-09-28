@@ -225,18 +225,23 @@ export function setBoneField(
   label: string,
   coalesce = false,
 ): Command {
-  let before: unknown = null;
+  // `captured`, not a null sentinel: null is a real prior value.
+  let before: unknown;
+  let captured = false;
   return makeCommand({
     label,
     apply: (m) => {
       const b = getBone(m, id);
       if (!b) return;
-      if (before === null) before = b[field];
+      if (!captured) {
+        before = b[field];
+        captured = true;
+      }
       (b as unknown as Record<string, unknown>)[field] = value;
     },
     revert: (m) => {
       const b = getBone(m, id);
-      if (b && before !== null) (b as unknown as Record<string, unknown>)[field] = before;
+      if (b && captured) (b as unknown as Record<string, unknown>)[field] = before;
     },
     ...(coalesce ? { coalesceKey: `bone-field:${id}:${field}` } : {}),
   });
@@ -318,18 +323,22 @@ export function bindLayers(boneId: string, layerIds: string[]): Command {
 }
 
 export function unbindLayer(layerId: string): Command {
-  let before: string | null | undefined = null;
+  let before: string | null = null;
+  let captured = false;
   return makeCommand({
     label: "unbind layer",
     apply: (m) => {
       const l = getLayer(m, layerId);
       if (!l) return;
-      if (before === null) before = l.boneId;
+      if (!captured) {
+        before = l.boneId;
+        captured = true;
+      }
       l.boneId = null;
     },
     revert: (m) => {
       const l = getLayer(m, layerId);
-      if (l && before !== null) l.boneId = before ?? null;
+      if (l && captured) l.boneId = before;
     },
   });
 }
@@ -338,59 +347,104 @@ export function unbindLayer(layerId: string): Command {
 
 export function setLayerField(
   id: string,
-  field: "visible" | "opacity" | "name" | "slot" | "side" | "order",
+  field: "visible" | "opacity" | "name" | "slot" | "side" | "order" | "boneId" | "clipTo",
   value: unknown,
   label: string,
   coalesce = false,
 ): Command {
-  let before: unknown = null;
+  // Auto-rig sets clipTo/boneId/side from null — a null sentinel made those
+  // undos silently do nothing.
+  let before: unknown;
+  let captured = false;
   return makeCommand({
     label,
     apply: (m) => {
       const l = getLayer(m, id);
       if (!l) return;
-      if (before === null) before = (l as unknown as Record<string, unknown>)[field];
+      if (!captured) {
+        before = (l as unknown as Record<string, unknown>)[field];
+        captured = true;
+      }
       (l as unknown as Record<string, unknown>)[field] = value;
     },
     revert: (m) => {
       const l = getLayer(m, id);
-      if (l && before !== null) (l as unknown as Record<string, unknown>)[field] = before;
+      if (l && captured) (l as unknown as Record<string, unknown>)[field] = before;
     },
     ...(coalesce ? { coalesceKey: `layer-field:${id}:${String(field)}` } : {}),
   });
 }
 
-export function reorderLayer(id: string, newOrder: number): Command {
-  let before: number | null = null;
+/** Painter's order as the solver and layer list see it: by `order`, ties
+ *  broken by array position (both sort stably). */
+export function paintStack(model: OarManifest): OarLayer[] {
+  return model.layers
+    .map((l, i) => ({ l, i }))
+    .sort((a, b) => a.l.order - b.l.order || a.i - b.i)
+    .map(({ l }) => l);
+}
+
+/** Step a layer one place forward (+1) or back (−1) past its neighbour in
+ *  the painter's stack. `order ± 1` alone lands on the neighbour's value and
+ *  leaves the two tied, so nothing visibly moves. Only the two layers change
+ *  (renumbering everything would shift the hair's parallax deltas). */
+export function stepLayer(id: string, dir: 1 | -1): Command {
+  let before: Map<string, number> | null = null;
+  let after: Map<string, number> | null = null;
   return makeCommand({
-    label: "reorder layer",
+    label: dir > 0 ? "move layer forward" : "move layer back",
     apply: (m) => {
-      const l = getLayer(m, id);
-      if (!l) return;
-      if (before === null) before = l.order;
-      l.order = newOrder;
+      if (!after) {
+        const stack = paintStack(m);
+        const i = stack.findIndex((l) => l.id === id);
+        const j = i + dir;
+        if (i < 0 || j < 0 || j >= stack.length) return;
+        const self = stack[i]!;
+        const other = stack[j]!;
+        before = new Map([[self.id, self.order], [other.id, other.order]]);
+        if (self.order !== other.order) {
+          after = new Map([[self.id, other.order], [other.id, self.order]]);
+        } else {
+          // Tied: land halfway between the neighbour and whatever lies beyond.
+          const beyond = stack[j + dir];
+          const far = beyond && beyond.order !== other.order ? beyond.order : other.order + dir;
+          after = new Map([[self.id, (other.order + far) / 2]]);
+        }
+      }
+      for (const [lid, order] of after) {
+        const l = getLayer(m, lid);
+        if (l) l.order = order;
+      }
     },
     revert: (m) => {
-      const l = getLayer(m, id);
-      if (l && before !== null) l.order = before;
+      if (!before) return;
+      for (const [lid, order] of before) {
+        const l = getLayer(m, lid);
+        if (l) l.order = order;
+      }
     },
-    coalesceKey: `layer-order:${id}`,
   });
 }
 
 export function setPhysics(id: string, physics: OarPhysics | null): Command {
-  let before: OarPhysics | null | undefined = null;
+  let before: OarPhysics | null = null;
+  let captured = false;
+  const copy = (p: OarPhysics | null): OarPhysics | null =>
+    p ? { ...p, customPivot: p.customPivot ? ([...p.customPivot] as Vec2) : null } : null;
   return makeCommand({
     label: "physics change",
     apply: (m) => {
       const l = getLayer(m, id);
       if (!l) return;
-      if (before === null) before = l.physics ? { ...l.physics } : null;
-      l.physics = physics ? { ...physics } : null;
+      if (!captured) {
+        before = copy(l.physics);
+        captured = true;
+      }
+      l.physics = copy(physics);
     },
     revert: (m) => {
       const l = getLayer(m, id);
-      if (l && before !== null) l.physics = before ? { ...before } : null;
+      if (l && captured) l.physics = copy(before);
     },
     coalesceKey: `layer-physics:${id}`,
   });
@@ -515,6 +569,26 @@ export function replaceMeshGeometry(
 
 export function addCorrective(corrective: OarCorrective): Command {
   return insertCommand(`corrective ${corrective.name}`, (m) => m.correctives, corrective);
+}
+
+/** Edit a corrective's driver (param, value, falloff…). Slider drags
+ *  coalesce; undo restores the driver as it was before the first edit. */
+export function setCorrectiveDriver(id: string, patch: Partial<OarCorrective["driver"]>): Command {
+  let before: OarCorrective["driver"] | null = null;
+  return makeCommand({
+    label: "edit corrective driver",
+    apply: (m) => {
+      const c = m.correctives.find((x) => x.id === id);
+      if (!c) return;
+      if (!before) before = { ...c.driver };
+      Object.assign(c.driver, patch);
+    },
+    revert: (m) => {
+      const c = m.correctives.find((x) => x.id === id);
+      if (c && before) c.driver = { ...before };
+    },
+    coalesceKey: `corrective-driver:${id}`,
+  });
 }
 
 export function deleteCorrective(id: string): Command | null {

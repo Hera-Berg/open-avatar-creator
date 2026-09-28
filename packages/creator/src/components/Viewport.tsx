@@ -8,6 +8,7 @@ import {
   invertedTriangles,
   keyIndexAt,
   newId,
+  pivotOf,
   solveSkeleton,
   type OarBone,
   type OarManifest,
@@ -27,6 +28,7 @@ import {
   replaceMeshGeometry,
   addCorrective,
   setKeyformKeys,
+  setPhysics,
 } from "../state/ops";
 import { addVertexAt, deleteVertexAt } from "../state/meshOps";
 
@@ -37,7 +39,8 @@ type Drag =
   | { kind: "boneHead"; boneId: string }
   | { kind: "meshVerts"; layerId: string; indices: number[]; lastCanvas: Vec2; moved: boolean; restBefore: Vec2[]; correctiveId: string | null }
   | { kind: "meshBox"; start: Vec2; current: Vec2 }
-  | { kind: "softMove"; layerId: string; lastCanvas: Vec2 };
+  | { kind: "softMove"; layerId: string; lastCanvas: Vec2 }
+  | { kind: "pivot"; layerId: string };
 
 const SNAP_SCREEN_PX = 12;
 
@@ -185,6 +188,20 @@ export function Viewport() {
     return l ? l.positions : null;
   };
 
+  /** The physics pivot of the single selected layer, where the solver puts
+   *  it this frame, plus the rest/solved vertices to map drags back to rest. */
+  const pivotInfo = () => {
+    if (tool !== "select" || selection.layers.length !== 1) return null;
+    const layer = model.layers.find((l) => l.id === selection.layers[0]);
+    if (!layer?.physics?.enabled) return null;
+    const positions = solvedPositionsFor(layer.id);
+    const mesh = layer.mesh ? model.meshes.find((m) => m.id === layer.mesh) : assets.solveCtx.meshCache.get(layer.id);
+    const rest = mesh?.vertices;
+    if (!positions || !rest || rest.length !== positions.length) return null;
+    const p = pivotOf(layer, positions, rest);
+    return { layer, positions, rest, at: [p.x, p.y] as Vec2 };
+  };
+
   const hitMeshVertex = (canvasPt: Vec2): number | null => {
     const me = meshForEdit();
     if (!me) return null;
@@ -246,7 +263,16 @@ export function Viewport() {
       return;
     }
 
-    // select tool
+    // select tool — the pivot handle sits on top of everything else
+    const piv = pivotInfo();
+    if (piv) {
+      const sp = toScreen(piv.at);
+      const cp = toScreen(canvasPt);
+      if (Math.hypot(sp[0] - cp[0], sp[1] - cp[1]) < 10) {
+        dragRef.current = { kind: "pivot", layerId: piv.layer.id };
+        return;
+      }
+    }
     const boneHit = hitBone(canvasPt);
     if (boneHit) {
       const s = useStore.getState();
@@ -342,6 +368,28 @@ export function Viewport() {
         if (dx === 0 && dy === 0) break;
         drag.lastCanvas = canvasPt;
         softMoveDelta(drag.layerId, canvasPt, dx, dy);
+        break;
+      }
+      case "pivot": {
+        const piv = pivotInfo();
+        const layer = s.model.layers.find((l) => l.id === drag.layerId);
+        if (!piv || !layer?.physics) break;
+        // Back to rest space: undo the displacement of the nearest vertex
+        // (the solver moves the pivot with that same displacement).
+        let k = 0;
+        let best = Infinity;
+        piv.positions.forEach((p, i) => {
+          const d = (p[0] - canvasPt[0]) ** 2 + (p[1] - canvasPt[1]) ** 2;
+          if (d < best) {
+            best = d;
+            k = i;
+          }
+        });
+        const rest: Vec2 = [
+          canvasPt[0] - (piv.positions[k]![0] - piv.rest[k]![0]),
+          canvasPt[1] - (piv.positions[k]![1] - piv.rest[k]![1]),
+        ];
+        s.execute(setPhysics(layer.id, { ...layer.physics, pivot: "custom", customPivot: rest }));
         break;
       }
       case "meshBox": {
@@ -606,6 +654,20 @@ export function Viewport() {
           strokeWidth={1}
           strokeDasharray="4 3"
         />,
+      );
+    }
+
+    // Physics pivot handle (drag to set a custom pivot).
+    const piv = pivotInfo();
+    if (piv) {
+      const [px, py] = toScreen(piv.at);
+      const custom = piv.layer.physics!.pivot === "custom";
+      elems.push(
+        <g key="pivot" style={{ cursor: "move" }}>
+          <title>physics pivot ({piv.layer.physics!.pivot}) — drag to set a custom pivot</title>
+          <circle cx={px} cy={py} r={7} fill={custom ? "rgba(255,160,64,0.35)" : "none"} stroke="#ffa040" strokeWidth={2} />
+          <circle cx={px} cy={py} r={2} fill="#ffa040" />
+        </g>,
       );
     }
 

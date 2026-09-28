@@ -62,6 +62,9 @@ export const RIG_PARAM_DEFAULTS = {
   headTurnDeg: 30, // cylinder warp range at head_yaw = ±1
   headTurnDepth: 0.8, // face-turn warp strength: how far features slide toward the turn (capped so it never folds)
   headPitchDeg: 10, // vertical cylinder warp at head_pitch = ±1 — far tighter than yaw; the face topology breaks past ~20°
+  headPitchDepth: 1.5, // nod strength: how far the face front travels vs the silhouette (capped so it never folds)
+  headPitchParallax: 1, // ears counter-move on a nod (they sit on the rotation axis); 0 = ride the face surface
+  gazeLidDrop: 0.3, // upper lids lower this share when gazing fully down — a downcast look, not a stare
   headParallaxPx: 3, // hair depth parallax per order step (clamped ±4)
   hairWarpFollow: 1, // how much hair follows the cylinder warp (1 = attached like the eyes)
   bodyRollDeg: 12, // spine driver at head_roll = ±1

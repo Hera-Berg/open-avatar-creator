@@ -9,6 +9,7 @@ import {
   newId,
   radToDeg,
   type DriverParam,
+  type OarLayer,
   type OarPhysics,
   type Vec2,
 } from "@oar/core";
@@ -17,6 +18,7 @@ import {
   addMesh,
   deleteCorrective,
   setBoneField,
+  setCorrectiveDriver,
   setLayerField,
   setPhysics,
   setRigParam,
@@ -37,6 +39,11 @@ const PHYSICS_DEFAULT: OarPhysics = {
   pivot: "top",
   customPivot: null,
 };
+
+/** Rest-pose top-centre of a layer — where the "top" pivot sits at rest. */
+function defaultPivot(layer: OarLayer): Vec2 {
+  return [layer.x + layer.width / 2, layer.y];
+}
 
 function BoneSection() {
   const selection = useStore((s) => s.selection);
@@ -223,15 +230,46 @@ function PhysicsSection() {
                     useStore
                       .getState()
                       .execute(
-                        setPhysics(layer.id, { ...layer.physics!, pivot: e.target.value as OarPhysics["pivot"] }),
+                        setPhysics(layer.id, {
+                          ...layer.physics!,
+                          pivot: e.target.value as OarPhysics["pivot"],
+                          // Seed a custom pivot where "top" was, so switching never jumps.
+                          customPivot:
+                            e.target.value === "custom"
+                              ? (layer.physics!.customPivot ?? defaultPivot(layer))
+                              : layer.physics!.customPivot,
+                        }),
                       )
                   }
                 >
                   <option value="top">top (hangs — hair)</option>
                   <option value="bottom">bottom (flicks — ears)</option>
                   <option value="centre">centre</option>
+                  <option value="custom">custom (drag the ◎ on canvas)</option>
                 </select>
               </label>
+              {layer.physics.pivot === "custom" && (
+                <div className="row" title="Rest-pose canvas position; it rides the layer as it moves">
+                  {([0, 1] as const).map((axis) => (
+                    <label key={axis}>
+                      {axis === 0 ? "x" : "y"}{" "}
+                      <input
+                        type="number"
+                        step={1}
+                        style={{ width: "5em" }}
+                        value={Math.round((layer.physics!.customPivot ?? defaultPivot(layer))[axis])}
+                        onChange={(e) => {
+                          const v = Number(e.target.value);
+                          if (!Number.isFinite(v)) return;
+                          const next = [...(layer.physics!.customPivot ?? defaultPivot(layer))] as Vec2;
+                          next[axis] = v;
+                          useStore.getState().execute(setPhysics(layer.id, { ...layer.physics!, customPivot: next }));
+                        }}
+                      />
+                    </label>
+                  ))}
+                </div>
+              )}
             </>
           )}
         </>
@@ -291,6 +329,9 @@ function ParamsSection() {
               ["hairWarpFollow", "Hair warp follow", 0, 1],
               ["headTurnDeg", "Head turn angle (deg)", 0, 45],
               ["headPitchDeg", "Head pitch angle (deg)", 0, 30],
+              ["headPitchDepth", "Head pitch depth (face front vs outline)", 0, 3],
+              ["headPitchParallax", "Ear counter-move on nod", 0, 2],
+              ["gazeLidDrop", "Lids lower when gazing down", 0, 0.8],
               ["headTurnDepth", "Head turn depth", 0, 1.5],
               ["headParallaxPx", "Hair parallax (px/step)", 0, 10],
             ] as const
@@ -323,17 +364,7 @@ function CorrectiveBanner() {
   const keys = params ? Object.keys(params) : [];
 
   const updateDriver = (patch: Partial<typeof corr.driver>) => {
-    useStore.getState().execute({
-      label: "edit corrective driver",
-      time: Date.now(),
-      apply: (m) => {
-        const c = m.correctives.find((x) => x.id === corr.id);
-        if (c) Object.assign(c.driver, patch);
-      },
-      revert: (m) => {
-        void m;
-      },
-    });
+    useStore.getState().execute(setCorrectiveDriver(corr.id, patch));
   };
 
   const makePermanent = () => {

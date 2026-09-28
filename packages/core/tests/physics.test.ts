@@ -77,3 +77,23 @@ describe("physics", () => {
     expect(energyLively).toBeGreaterThan(energyDead * 2);
   });
 });
+
+describe("custom physics pivot", () => {
+  it("rides the layer: a rest-space pivot moves with its nearest vertex", async () => {
+    const { pivotOf } = await import("../src/solve");
+    const layer = {
+      id: "h", name: "h", path: [], src: "", x: 0, y: 0, width: 100, height: 100, opacity: 1,
+      visible: true, order: 0, slot: "hair_back", side: null, boneId: null, mesh: null, clipTo: null,
+      physics: {
+        enabled: true, stiffness: 6, damping: 0.85, maxAngle: 12, inertia: 1, gravity: 0.5,
+        pivot: "custom" as const, customPivot: [40, 10] as [number, number],
+      },
+    };
+    const rest: [number, number][] = [[0, 0], [100, 0], [0, 100], [100, 100]];
+    // The whole layer has moved 30px right and 12px down (head roll/turn).
+    const moved = rest.map(([x, y]) => [x + 30, y + 12] as [number, number]);
+    expect(pivotOf(layer, moved, rest)).toEqual({ x: 70, y: 22 });
+    // At rest it is exactly where it was authored.
+    expect(pivotOf(layer, rest, rest)).toEqual({ x: 40, y: 10 });
+  });
+});

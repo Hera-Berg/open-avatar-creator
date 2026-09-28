@@ -2,7 +2,7 @@
 // and often cannot be clicked on canvas at all — this list must work.
 
 import { useStore } from "../state/store";
-import { setLayerField, unbindLayer, reorderLayer } from "../state/ops";
+import { setLayerField, unbindLayer, stepLayer } from "../state/ops";
 import type { OarLayer } from "@oar/core";
 
 function Row({ layer }: { layer: OarLayer }) {
@@ -58,7 +58,7 @@ function Row({ layer }: { layer: OarLayer }) {
           title="move forward"
           onClick={(e) => {
             e.stopPropagation();
-            useStore.getState().execute(reorderLayer(layer.id, layer.order + 1));
+            useStore.getState().execute(stepLayer(layer.id, 1));
           }}
         >
           ↑
@@ -67,7 +67,7 @@ function Row({ layer }: { layer: OarLayer }) {
           title="move back"
           onClick={(e) => {
             e.stopPropagation();
-            useStore.getState().execute(reorderLayer(layer.id, layer.order - 1));
+            useStore.getState().execute(stepLayer(layer.id, -1));
           }}
         >
           ↓

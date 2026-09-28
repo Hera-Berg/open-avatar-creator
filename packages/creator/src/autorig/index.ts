@@ -285,7 +285,7 @@ export function runAutoRig(
           }
         }
         // Weighted layers no longer need a rigid bind.
-        cmds.push(setLayerField(layer.id, "boneId" as never, null, `unbind ${layer.name}`));
+        cmds.push(setLayerField(layer.id, "boneId", null, `unbind ${layer.name}`));
         void meshId;
       }
     }
@@ -410,7 +410,7 @@ export function runAutoRig(
       cmds.push(setLayerField(innerId, "visible", false, "hide consumed inner mouth"));
     }
     for (const [layerId, baseId] of faceRig.clipAssignments) {
-      cmds.push(setLayerField(layerId, "clipTo" as never, baseId, "runtime iris clip"));
+      cmds.push(setLayerField(layerId, "clipTo", baseId, "runtime iris clip"));
     }
     if (model.params.mouthRangeUpper === undefined && faceRig.suggestedParams.mouthRangeUpper) {
       cmds.push(setRigParam("mouthRangeUpper", faceRig.suggestedParams.mouthRangeUpper, false));
