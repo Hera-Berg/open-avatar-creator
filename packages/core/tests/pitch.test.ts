@@ -5,7 +5,7 @@ import { emptyRig, type OarManifest, type Vec2 } from "../src/model/types";
 import { makeModel, makeLayer, makeSpine } from "./helpers";
 import { solveSkeleton } from "../src/skeleton/solve";
 import { apply as matApply, type Mat2D } from "../src/geometry/mat2d";
-import { headTurnX, headPitchY, isMonotonic, pitchSurface, safePitchDepth } from "../src/headturn/warp";
+import { faceInterior, headTurnX, headPitchY, isMonotonic, pitchSurface, safePitchDepth, PITCH_SKULL } from "../src/headturn/warp";
 import { clamp, degToRad } from "../src/geometry/util";
 
 const PITCH_DEG = 10; // RIG_PARAM_DEFAULTS.headPitchDeg
@@ -64,8 +64,11 @@ function expectExact(
     const mesh = ctx.meshCache.get(layerId)!;
     mesh.vertices.forEach((rv: Vec2, i: number) => {
       const wx = warpX(rv[0]!, yawAngle);
-      const [ex, ey] = matApply(headMat, wx, warpY(wx, rv[1]!, pitchAngle));
-      expect(layer.positions[i]![0]).toBeCloseTo(ex + parallaxDx, 1);
+      const wy = warpY(wx, rv[1]!, pitchAngle);
+      // Hair parallax in the head frame, over the face only.
+      const px = parallaxDx * faceInterior((wx - 450) / 150, (wy - 300) / 200);
+      const [ex, ey] = matApply(headMat, wx + px, wy);
+      expect(layer.positions[i]![0]).toBeCloseTo(ex, 1);
       expect(layer.positions[i]![1]).toBeCloseTo(ey, 1);
     });
   }
@@ -117,9 +120,9 @@ describe("head pitch (face-surface nod)", () => {
     const slide = (x: number, y: number) => warpY(x, y, a) - y;
     const front = slide(450, 300); // face centre
     expect(front).toBeGreaterThan(20);
-    expect(slide(450, 500)).toBeLessThan(front * 0.5); // chin
-    expect(slide(450, 100)).toBeLessThan(front * 0.5); // crown
-    expect(slide(600, 300)).toBeLessThan(front * 0.5); // cheek outline
+    expect(slide(450, 500)).toBeLessThan(front * 0.6); // chin
+    expect(slide(450, 100)).toBeLessThan(front * 0.6); // crown
+    expect(slide(600, 300)).toBeLessThan(front * 0.6); // cheek outline
     // Nodding down compresses the lower face; tilting up stretches it.
     const lowerFace = (p: number) => warpY(450, 500, p) - warpY(450, 300, p);
     expect(lowerFace(a)).toBeLessThan(200);
@@ -144,22 +147,29 @@ describe("head pitch (face-surface nod)", () => {
     expect(pitchSurface(0, 0)).toBe(1);
   });
 
-  it("ears counter-move: nodding down, they drop less than the face front", () => {
-    const { model, headBoneId } = build();
-    model.layers.push(
-      makeLayer({ id: "l_ear", name: "ear", slot: "ear", x: 590, y: 280, width: 30, height: 60, boneId: headBoneId, order: 4 }),
-    );
+  it("hair moves with the skull as one piece: no stretch past the face outline", () => {
+    // Everything beyond the face bump — hair tips, crown, back hair, ears —
+    // travels by exactly the skull share; a surface decaying to zero left
+    // hair tips behind while the face moved, stretching every strand.
+    const a = degToRad(PITCH_DEG);
+    const slide = (x: number, y: number) => warpY(x, y, a) - y;
+    const skull = slide(450, 300) * PITCH_SKULL;
+    expect(skull).toBeGreaterThan(5);
+    for (const [x, y] of [[450, 30], [450, 580], [680, 300], [240, 520], [700, 560]] as const) {
+      expect(slide(x, y), `(${x},${y})`).toBeCloseTo(skull, 6);
+    }
+    // ...and the real solve agrees for the whole hair layer's outer ring.
+    const { model } = build();
     const ctx = createSolveContext();
     const solved = solveModel(model, { head_pitch: 1 }, ctx);
-    const mean = (id: string) => {
-      const l = solved.layers.find((x) => x.id === id)!;
-      return l.positions.reduce((s, p) => s + p[1], 0) / l.positions.length;
-    };
-    const restMean = (id: string) => {
-      const v = ctx.meshCache.get(id)!.vertices;
-      return v.reduce((s, p) => s + p[1], 0) / v.length;
-    };
-    expect(mean("l_ear") - restMean("l_ear")).toBeLessThan(mean("l_eye") - restMean("l_eye") - 10);
+    const hair = solved.layers.find((l) => l.id === "l_hair")!;
+    const rest = ctx.meshCache.get("l_hair")!.vertices;
+    for (let i = 0; i < rest.length; i++) {
+      const u = (rest[i]![0] - 450) / 150;
+      const v = (rest[i]![1] - 300) / 200;
+      if (u * u + v * v < 1.3 * 1.3) continue;
+      expect(hair.positions[i]![1] - rest[i]![1]).toBeCloseTo(skull, 1);
+    }
   });
 
   it("back hair takes the SAME warp as the face (helmet rule, like yaw)", () => {

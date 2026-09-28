@@ -408,8 +408,7 @@ export function runAutoRig(
     }
     for (const innerId of faceRig.consumedInner) {
       cmds.push(setLayerField(innerId, "visible", false, "hide consumed inner mouth"));
-    }
-    for (const [layerId, baseId] of faceRig.clipAssignments) {
+    }    for (const [layerId, baseId] of faceRig.clipAssignments) {
       cmds.push(setLayerField(layerId, "clipTo", baseId, "runtime iris clip"));
     }
     if (model.params.mouthRangeUpper === undefined && faceRig.suggestedParams.mouthRangeUpper) {

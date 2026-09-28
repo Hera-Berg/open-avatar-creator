@@ -97,3 +97,63 @@ describe("custom physics pivot", () => {
     expect(pivotOf(layer, rest, rest)).toEqual({ x: 40, y: 10 });
   });
 });
+
+describe("root-pinned sway", () => {
+  const hairLayer = (pivot: "top" | "bottom" = "top") => ({
+    id: "h", name: "h", path: [], src: "", x: 0, y: 0, width: 100, height: 200, opacity: 1,
+    visible: true, order: 0, slot: "hair_back", side: null, boneId: null, mesh: null, clipTo: null,
+    physics: {
+      enabled: true, stiffness: 6, damping: 0.85, maxAngle: 16, inertia: 1, gravity: 0.5,
+      pivot, customPivot: null,
+    },
+  });
+
+  it("weights are 0 at the pinned end and 1 at the free end, and pin 0 is the rigid swing", async () => {
+    const { swayWeights } = await import("../src/solve");
+    const rest: [number, number][] = [[50, 0], [50, 100], [50, 200]];
+    const top = swayWeights(hairLayer("top"), rest);
+    expect(top[0]).toBe(0);
+    expect(top[1]).toBeCloseTo(0.5, 6);
+    expect(top[2]).toBe(1);
+    const bottom = swayWeights(hairLayer("bottom"), rest);
+    expect(bottom[2]).toBe(0);
+    expect(bottom[0]).toBe(1);
+    expect(swayWeights(hairLayer("top"), rest, 0)).toEqual([1, 1, 1]);
+  });
+
+  it("a sharp head move never swings the hair's roots off the scalp; the tips still sway", async () => {
+    const { makeModel, makeLayer, makeSpine } = await import("./helpers");
+    const { solveModel, createSolveContext } = await import("../src/solve");
+    const spine = makeSpine();
+    const headBone = spine[spine.length - 1]!;
+    const run = (inertia: number) => {
+      const layer = makeLayer({
+        id: "hair", name: "hair-back", slot: "hair_back", x: 380, y: 100, width: 140, height: 400,
+        boneId: headBone.id, order: 1,
+        physics: { ...hairLayer().physics, inertia },
+      });
+      const model = makeModel({ bones: spine, layers: [layer] });
+      const ctx = createSolveContext();
+      const frames = [];
+      for (let f = 0; f < 30; f++) {
+        ctx.dt = 1 / 60;
+        const k = Math.min(1, f / 3);
+        frames.push(solveModel(model, { head_x: k, head_roll: k }, ctx).layers[0]!.positions.map((p) => [...p]));
+      }
+      return { frames, rest: ctx.meshCache.get("hair")!.vertices };
+    };
+    const live = run(1);
+    const still = run(0); // same pose, no swing: where the head alone puts the hair
+    let rootDrift = 0;
+    let tipSway = 0;
+    live.rest.forEach((v, i) => {
+      for (let f = 0; f < live.frames.length; f++) {
+        const d = Math.hypot(live.frames[f]![i]![0]! - still.frames[f]![i]![0]!, live.frames[f]![i]![1]! - still.frames[f]![i]![1]!);
+        if (v[1] <= 100 + 1e-6) rootDrift = Math.max(rootDrift, d);
+        if (v[1] >= 500 - 1e-6) tipSway = Math.max(tipSway, d);
+      }
+    });
+    expect(rootDrift).toBeLessThan(0.5);
+    expect(tipSway).toBeGreaterThan(5);
+  });
+});

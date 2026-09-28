@@ -57,27 +57,41 @@ export function headTurnX(
 // foreshortens. A head nodding forward is a sphere rotating: the front of the
 // face (eyes, nose, mouth) travels furthest, the silhouette (crown, chin,
 // cheek outline) barely moves. So the pitch displacement is sampled from a
-// face SURFACE — a radial bump over both axes:
+// face SURFACE over both axes, on top of a rigid skull:
 //
 //   y' = centre + (v + depth · sin φ · s(u, v)) · radius
-//   s(u, v) = (1 − r²/P²)²   r² = u² + v²,  P = PITCH_SUPPORT
+//   s(u, v) = F + (1 − F) · (1 − r²/P²)²   r² = u² + v² < P², else F
 //
-// Nodding down, the features drop while the chin holds: the lower face
-// compresses and more crown shows — the Live2D look-down. Hair and features
-// ride the same surface, so bang tips at eye level travel with the eyes (no
-// swallowing) and the head keeps its height (s is symmetric in v). The depth
-// is capped exactly like the yaw warp so the map never folds along v.
+// F is the SKULL: everything attached to the head — hair, ears, crown,
+// outline — travels by the same F share, so hair moves as one piece with the
+// head (a surface that decays to zero leaves hair tips and crown behind while
+// the face moves, stretching every strand). The face front travels further
+// on top of that: nodding down, the features drop past the outline, the
+// lower face compresses and more crown shows — the Live2D look-down. The
+// bump reaches the floor with zero slope, so nothing kinks at the outline.
+// Bang tips at eye level travel with the eyes (no swallowing); the head keeps
+// its height (s is symmetric in v). The depth is capped exactly like the yaw
+// warp so the map never folds along v.
 
-/** Support radius of the pitch surface bump, in face radii. */
-export const PITCH_SUPPORT = 1.6;
-/** max |∂s/∂v|: 8 / (3√3 · P), reached on the u = 0 column. */
-const S_SLOPE_MAX = 8 / (3 * Math.sqrt(3) * PITCH_SUPPORT);
+/** Radius (face radii) where the face bump has settled onto the skull. */
+export const PITCH_SUPPORT = 1.3;
+/** Skull share of the face-front travel — hair, ears and outline. */
+export const PITCH_SKULL = 0.4;
+/** max |∂s/∂v|: (1 − F) · 8 / (3√3 · P), reached on the u = 0 column. */
+const S_SLOPE_MAX = ((1 - PITCH_SKULL) * 8) / (3 * Math.sqrt(3) * PITCH_SUPPORT);
 
-export function pitchSurface(u: number, v: number): number {
+/** The face interior: 1 at the head centre, easing to 0 (zero slope) by
+ *  PITCH_SUPPORT radii — just past the outline. Motion scaled by it happens
+ *  over the face and never at the silhouette. */
+export function faceInterior(u: number, v: number): number {
   const r2 = (u * u + v * v) / (PITCH_SUPPORT * PITCH_SUPPORT);
   if (r2 >= 1) return 0;
   const s = 1 - r2;
   return s * s;
+}
+
+export function pitchSurface(u: number, v: number): number {
+  return PITCH_SKULL + (1 - PITCH_SKULL) * faceInterior(u, v);
 }
 
 /** The pitch depth actually applied: `depth`, capped so the nod stays

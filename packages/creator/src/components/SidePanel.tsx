@@ -275,6 +275,7 @@ function PhysicsSection() {
         </>
       )}
       <h4>Global multipliers</h4>
+      {global("physicsPin", "root pin (0 = whole layer swings)", 0, 1)}
       {global("bounce", "bounce (master amplitude)")}
       {global("softness", "softness (master settle time)", 0.2, 3)}
       {global("hairSwayX", "hair sway — horizontal")}
@@ -330,7 +331,6 @@ function ParamsSection() {
               ["headTurnDeg", "Head turn angle (deg)", 0, 45],
               ["headPitchDeg", "Head pitch angle (deg)", 0, 30],
               ["headPitchDepth", "Head pitch depth (face front vs outline)", 0, 3],
-              ["headPitchParallax", "Ear counter-move on nod", 0, 2],
               ["gazeLidDrop", "Lids lower when gazing down", 0, 0.8],
               ["headTurnDepth", "Head turn depth", 0, 1.5],
               ["headParallaxPx", "Hair parallax (px/step)", 0, 10],

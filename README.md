@@ -42,7 +42,7 @@ looks right in the studio.
 ```bash
 npm install
 npm run dev        # vite dev server on :3001
-npm test           # vitest: core (119) + creator (65)
+npm test           # vitest: core (122) + creator (65)
 npm run build      # type-check + production bundle
 ```
 

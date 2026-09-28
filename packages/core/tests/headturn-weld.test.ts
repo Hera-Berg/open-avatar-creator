@@ -1,7 +1,7 @@
 import { RIG_PARAM_DEFAULTS } from "../src/model/params";
 import { describe, it, expect } from "vitest";
 import { solveModel, createSolveContext } from "../src/solve";
-import { headTurnX } from "../src/headturn/warp";
+import { headTurnX, faceInterior } from "../src/headturn/warp";
 import { emptyRig, type OarManifest } from "../src/model/types";
 import { makeModel, makeLayer } from "./helpers";
 
@@ -65,9 +65,11 @@ describe("head-turn welding", () => {
     // parallax (±4 steps).
     const angle = (30 * Math.PI) / 180;
     const parallax = Math.min(4, 12 - 5) * Math.sin(angle) * 3;
-    bangsMesh.vertices.forEach(([rx], i) => {
+    bangsMesh.vertices.forEach(([rx, ry], i) => {
       const u = Math.max(-3, Math.min(3, (rx - 450) / 150));
-      const expected = headTurnX(u, angle, 450, 150, RIG_PARAM_DEFAULTS.headTurnDepth) + parallax;
+      const warped = headTurnX(u, angle, 450, 150, RIG_PARAM_DEFAULTS.headTurnDepth);
+      // Parallax over the face only, fading to zero at the silhouette.
+      const expected = warped + parallax * faceInterior((warped - 450) / 150, (ry - 300) / 200);
       expect(bangs.positions[i]![0]).toBeCloseTo(expected, 1);
     });
     // And it is not zero — parallax still exists for depth.
